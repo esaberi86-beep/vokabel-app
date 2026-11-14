@@ -282,7 +282,17 @@
     .flip-inner { transition: none; }
   }
 
-  .backup p { color: var(--muted); font-size: 18px; text-align: left; }
+  /* ---------- Einstellungen ---------- */
+  .select {
+    font-size: 20px; padding-right: 48px; text-overflow: ellipsis;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='none' stroke='%237a7690' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 16px center;
+  }
+  .note { color: var(--muted); font-size: 17px; margin: 10px 2px 0; }
+  .tip { margin-top: 18px; background: var(--orange-soft); border-radius: 18px; padding: 14px 18px; font-size: 18px; }
+  .tip summary { font-weight: 700; cursor: pointer; min-height: 32px; }
+  .tip ol { margin: 10px 0 0; padding-left: 24px; }
+  .tip li { margin: 6px 0; }
   .hidden { display: none !important; }
 
   @media (min-width: 900px) {
@@ -295,7 +305,7 @@
 <header>
   <h1 id="title">📚 Meine Wörter</h1>
   <div class="stars" id="stars" aria-label="Sterne">⭐ <span id="starCount">0</span></div>
-  <button class="icon-btn" id="btnBackup" aria-label="Sichern">💾</button>
+  <button class="icon-btn" id="btnSettings" aria-label="Einstellungen">⚙️</button>
 </header>
 
 <main>
@@ -383,6 +393,36 @@
       </div>
     </div>
   </section>
+
+  <!-- Einstellungen -->
+  <section class="view" id="view-settings">
+    <div class="form-card">
+      <h2>🔊 Stimme</h2>
+      <label for="voiceSel">Englische Stimme</label>
+      <select class="field select" id="voiceSel"></select>
+      <div class="note" id="voiceNow"></div>
+      <button class="btn blue" id="btnVoiceTest">▶️ Probe hören</button>
+      <p class="note">Bei einzelnen Wörtern spielt die App eine echte Aufnahme aus einem Online-Wörterbuch ab, wenn es eine gibt. Ohne Internet und bei Sätzen spricht die Stimme.</p>
+      <details class="tip">
+        <summary>💡 Schönere Stimmen aufs iPad laden</summary>
+        <ol>
+          <li>iPad-<b>Einstellungen</b> öffnen</li>
+          <li><b>Bedienungshilfen → Gesprochene Inhalte → Stimmen</b></li>
+          <li><b>Englisch</b> wählen, dann z.B. <b>Englisch (UK) → Serena</b> oder <b>Daniel</b></li>
+          <li>Die Version <b>„Premium“</b> oder <b>„Erweitert“</b> laden (☁️-Symbol)</li>
+          <li>Die App neu öffnen und hier die neue Stimme auswählen</li>
+        </ol>
+      </details>
+    </div>
+
+    <div class="form-card" style="margin-top:18px">
+      <h2>💾 Sicherung</h2>
+      <p class="note" style="margin-top:0">Speichere ab und zu eine Sicherung, damit keine Wörter verloren gehen.</p>
+      <button class="btn blue" id="btnExport">⬇️ Sicherung speichern</button>
+      <button class="btn secondary" id="btnImport">⬆️ Sicherung laden</button>
+      <input type="file" id="importFile" accept=".json,application/json" class="hidden">
+    </div>
+  </section>
 </main>
 
 <nav>
@@ -400,19 +440,6 @@
       <button class="btn secondary" id="confirmNo">Nein</button>
       <button class="btn red" id="confirmYes">Ja</button>
     </div>
-  </div>
-</div>
-
-<!-- Sichern-Dialog -->
-<div class="overlay" id="backup">
-  <div class="dialog backup">
-    <div class="big">💾</div>
-    <p style="color:var(--ink);text-align:center;font-weight:700">Wörter sichern</p>
-    <p>Speichere ab und zu eine Sicherung, damit keine Wörter verloren gehen.</p>
-    <button class="btn blue" id="btnExport">⬇️ Sicherung speichern</button>
-    <button class="btn secondary" id="btnImport">⬆️ Sicherung laden</button>
-    <button class="btn secondary" id="btnBackupClose">Schließen</button>
-    <input type="file" id="importFile" accept=".json,application/json" class="hidden">
   </div>
 </div>
 
@@ -443,6 +470,7 @@
       unit: String(w.unit || '').trim(),
       box: Math.min(BOXES, Math.max(1, parseInt(w.box, 10) || 1)),
       created: w.created || Date.now(),
+      audio: typeof w.audio === 'string' && (w.audio === '' || /^https:\/\//.test(w.audio)) ? w.audio : undefined,
     };
   }
 
@@ -510,53 +538,239 @@
     });
   }
 
-  // ================= Aussprache =================
-  let voice = null;
-  function pickVoice() {
-    if (!('speechSynthesis' in window)) return;
-    const vs = speechSynthesis.getVoices();
-    const en = vs.filter(v => /^en[-_]/i.test(v.lang));
-    voice =
-      en.find(v => /en[-_]GB/i.test(v.lang) && v.localService) ||
-      en.find(v => /en[-_]GB/i.test(v.lang)) ||
-      en.find(v => /en[-_]US/i.test(v.lang) && v.localService) ||
-      en.find(v => /en[-_]US/i.test(v.lang)) ||
-      en[0] || null;
-  }
-  if ('speechSynthesis' in window) {
-    pickVoice();
-    speechSynthesis.onvoiceschanged = pickVoice;
+  // ================= Aussprache: Stimmen =================
+  const hasTTS = 'speechSynthesis' in window;
+  const wait = (ms) => new Promise(r => setTimeout(r, ms));
+  const normLang = (l) => String(l || '').replace('_', '-');
+  const isEn = (v) => /^en-(GB|US)$/i.test(normLang(v.lang));
+  // Spaß-Stimmen von Apple und alte Roboter-Stimmen aussortieren
+  // (auf deutschen Geräten heißen manche anders: Flüstern, Glocken, Spaßvogel …)
+  const NOVELTY = /albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoid|whisper|wobble|zarvox|fred|junior|ralph|kathy|katrin|monster|flüstern|glocken|neuigkeiten|seifenblasen|spaßvogel|orgel/i;
+  const ROBOTIC = /eddy|flo\b|grandma|grandpa|reed|rocko|sandy|shelley|compact/i;
+  const GOOD = /daniel|samantha|ava|serena|karen|kate|oliver|arthur|martha|allison|susan|evan|zoe|nathan|google (uk|us) english/i;
+
+  function voiceScore(v) {
+    const n = v.name;
+    let s = 0;
+    if (/premium/i.test(n)) s += 100;
+    else if (/enhanced|erweitert|neural|natural/i.test(n)) s += 80;
+    if (GOOD.test(n)) s += 40;
+    if (NOVELTY.test(n)) s -= 200;
+    if (ROBOTIC.test(n)) s -= 50;
+    if (/GB$/i.test(normLang(v.lang))) s += 5;
+    if (v.localService) s += 2;
+    return s;
   }
 
-  function speak(text, btn) {
+  let voices = [];
+  let voice = null;
+  function loadVoices() {
+    if (!hasTTS) return;
+    voices = speechSynthesis.getVoices().filter(isEn)
+      .sort((a, b) => voiceScore(b) - voiceScore(a) || a.name.localeCompare(b.name));
+    const saved = data.settings.voice;
+    voice = (saved && voices.find(v => v.voiceURI === saved)) || voices[0] || null;
+    if ($('view-settings').classList.contains('active')) renderSettings();
+  }
+  // Safari lädt die Stimmen erst nach und nach → auf „voiceschanged“ warten und zur Sicherheit nachfragen
+  const voicesReady = new Promise(resolve => {
+    if (!hasTTS) return resolve();
+    const check = () => { loadVoices(); if (voices.length) resolve(); };
+    speechSynthesis.addEventListener('voiceschanged', check);
+    check();
+    let tries = 0;
+    const t = setInterval(() => { check(); if (voices.length || ++tries > 30) { clearInterval(t); resolve(); } }, 200);
+  });
+
+  // ================= Aussprache: Abspielen =================
+  const player = new Audio();
+  let sayToken = 0;
+  let badAudio = false;
+
+  function setTalking(btn, on) {
+    if (!btn) return;
+    btn.classList.toggle('talking', on);
+    if (on) setTimeout(() => btn.classList.remove('talking'), 8000);
+  }
+  function stopAll() {
+    try { player.pause(); } catch (e) {}
+    if (hasTTS) speechSynthesis.cancel();
+    document.querySelectorAll('.talking').forEach(b => b.classList.remove('talking'));
+  }
+
+  // iPad: Ton und Sprache beim ersten Antippen „freischalten“
+  let unlocked = false;
+  function unlock() {
+    if (unlocked) return;
+    unlocked = true;
+    try {
+      player.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+      player.play().catch(() => {});
+    } catch (e) {}
+    if (hasTTS) { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); }
+  }
+  document.addEventListener('touchend', unlock, true);
+  document.addEventListener('click', unlock, true);
+
+  // Sprachausgabe (für Sätze immer, für Wörter wenn es keine Aufnahme gibt)
+  async function speak(text, btn, useVoice) {
     if (!text) return;
-    if (!('speechSynthesis' in window)) { toast('🔇 Vorlesen geht hier leider nicht'); return; }
-    speechSynthesis.cancel();
-    if (!voice) pickVoice();
+    if (!hasTTS) { toast('🔇 Vorlesen geht hier leider nicht'); return; }
+    if (!voices.length) await Promise.race([voicesReady, wait(1000)]);
+    const v = useVoice || voice;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = voice ? voice.lang : 'en-GB';
-    if (voice) u.voice = voice;
-    u.rate = 0.8;
-    u.pitch = 1.05;
-    if (btn) {
-      btn.classList.add('talking');
-      const stop = () => btn.classList.remove('talking');
-      u.onend = stop; u.onerror = stop;
-      setTimeout(stop, 6000);
-    }
+    u.lang = v ? normLang(v.lang) : 'en-GB'; // nie eine deutsche Stimme Englisch lesen lassen
+    if (v) u.voice = v;
+    u.rate = 0.9;
+    setTalking(btn, true);
+    u.onend = u.onerror = () => setTalking(btn, false);
+    speechSynthesis.cancel();
     speechSynthesis.speak(u);
   }
 
-  function speakBtn(text, small) {
+  // Echte Aufnahmen aus dem Free Dictionary
+  const audioMemo = {};
+  const wordKey = (t) => String(t || '').trim().toLowerCase().replace(/^to\s+/, '').replace(/[.!?]+$/, '');
+  function storedAudio(text) {
+    const k = wordKey(text);
+    if (k in audioMemo) return audioMemo[k];
+    const w = data.words.find(x => wordKey(x.en) === k && typeof x.audio === 'string');
+    return w ? w.audio : undefined;
+  }
+  function rememberAudio(text, url) {
+    const k = wordKey(text);
+    audioMemo[k] = url;
+    let changed = false;
+    data.words.forEach(x => { if (wordKey(x.en) === k && x.audio !== url) { x.audio = url; changed = true; } });
+    if (changed) save();
+  }
+  // Ergebnis: Adresse der Aufnahme, '' = gibt es nicht, undefined = gerade nicht erreichbar
+  async function findAudio(text) {
+    const k = wordKey(text);
+    if (!k || k.split(/\s+/).length > 3) return '';
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      const res = await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(k), { signal: ctrl.signal });
+      if (res.status === 404) return '';
+      if (!res.ok) return undefined;
+      const json = await res.json();
+      const rank = (u) => /-uk(-\d+)?\.mp3$/i.test(u) ? 0 : /-us(-\d+)?\.mp3$/i.test(u) ? 1 : 2; // UK zuerst, dann US
+      const found = (Array.isArray(json) ? json : [])
+        .flatMap(e => e.phonetics || [])
+        .filter(p => p.audio)
+        .sort((a, b) => rank(a.audio) - rank(b.audio));
+      if (!found.length) return '';
+
+      // Die Dateien des Wörterbuchs selbst sind oft nicht abrufbar. Die Originale liegen bei
+      // Wikimedia Commons – dort gibt es jede Aufnahme auch als MP3 (läuft auf dem iPad).
+      const ids = [...new Set(found.map(p => (String(p.sourceUrl || '').match(/curid=(\d+)/) || [])[1]).filter(Boolean))];
+      if (ids.length) {
+        const wm = await fetch('https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*' +
+          '&prop=videoinfo&viprop=url|derivatives&pageids=' + ids.join('|'), { signal: ctrl.signal });
+        if (wm.ok) {
+          const pages = ((await wm.json()).query || {}).pages || {};
+          const options = [];
+          ids.forEach((id, order) => { // Reihenfolge: UK → US
+            const page = pages[id] || {};
+            const vi = (page.videoinfo || [])[0];
+            if (!vi) return;
+            const mp3 = (vi.derivatives || []).find(d => d.type === 'audio/mpeg');
+            const src = mp3 ? mp3.src : /\.mp3(\?|$)/i.test(vi.url) ? vi.url.split('?')[0] : '';
+            // Aufnahmen wie „a dog“ nur nehmen, wenn es keine mit nur dem Wort gibt
+            const article = /-(a|an|the)[ _]/i.test(page.title || '') ? 10 : 0;
+            if (src) options.push({ src, score: article + order });
+          });
+          options.sort((a, b) => a.score - b.score);
+          if (options.length) return options[0].src;
+        }
+      }
+      return found[0].audio.startsWith('//') ? 'https:' + found[0].audio : found[0].audio;
+    } catch (e) {
+      return undefined; // offline oder zu langsam
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  function playAudio(url, btn) {
+    return new Promise(resolve => {
+      let settled = false;
+      const result = (ok) => { if (settled) return; settled = true; clearTimeout(timer); resolve(ok); };
+      const timer = setTimeout(() => { player.pause(); result(false); }, 4000);
+      player.onplaying = () => result(true);
+      player.onerror = () => {
+        setTalking(btn, false);
+        // Datei kaputt (nicht nur offline) → beim nächsten Mal gleich die Stimme nehmen
+        if (!settled && navigator.onLine !== false && player.src === url) badAudio = true;
+        result(false);
+      };
+      player.onended = () => setTalking(btn, false);
+      player.src = url;
+      const p = player.play();
+      if (p) p.catch(() => result(false));
+    });
+  }
+
+  // Einzelnes Wort: erst echte Aufnahme, sonst Sprachausgabe
+  async function sayWord(text, btn) {
+    text = String(text || '').trim();
+    if (!text) return;
+    const my = ++sayToken;
+    stopAll();
+    setTalking(btn, true);
+    let url = storedAudio(text);
+    if (url === undefined && navigator.onLine !== false) {
+      url = await findAudio(text);
+      if (my !== sayToken) return;
+      if (url !== undefined) rememberAudio(text, url);
+    }
+    badAudio = false;
+    if (url && await playAudio(url, btn)) return;
+    if (my !== sayToken) return;
+    if (badAudio) rememberAudio(text, undefined); // neu suchen beim nächsten Mal
+    speak(text, btn);
+  }
+  // Satz: immer Sprachausgabe
+  function saySentence(text, btn) {
+    sayToken++;
+    stopAll();
+    speak(String(text || '').trim(), btn);
+  }
+
+  function speakBtn(text, small, isWord) {
     const b = el('button', 'speak' + (small ? ' small' : ''), '🔊');
     b.type = 'button';
     b.setAttribute('aria-label', 'Vorlesen');
-    b.onclick = (e) => { e.stopPropagation(); speak(text, b); };
+    b.onclick = (e) => { e.stopPropagation(); isWord ? sayWord(text, b) : saySentence(text, b); };
     return b;
   }
 
+  // ================= Einstellungen =================
+  function renderSettings() {
+    const sel = $('voiceSel');
+    sel.innerHTML = '';
+    if (!hasTTS || !voices.length) {
+      sel.appendChild(new Option('Keine englische Stimme gefunden', ''));
+      sel.disabled = true;
+      $('voiceNow').textContent = '';
+      return;
+    }
+    sel.disabled = false;
+    sel.appendChild(new Option('✨ Automatisch (beste Stimme)', ''));
+    voices.forEach(v => sel.appendChild(new Option((/GB$/i.test(normLang(v.lang)) ? '🇬🇧 ' : '🇺🇸 ') + v.name, v.voiceURI)));
+    sel.value = data.settings.voice && voices.some(v => v.voiceURI === data.settings.voice) ? data.settings.voice : '';
+    $('voiceNow').textContent = voice ? 'Es spricht: ' + voice.name : '';
+  }
+  $('voiceSel').onchange = () => {
+    data.settings.voice = $('voiceSel').value;
+    save();
+    loadVoices();
+    saySentence('Hello! The dog is very big.', $('btnVoiceTest'));
+  };
+  $('btnVoiceTest').onclick = () => saySentence('Hello! The dog is very big.', $('btnVoiceTest'));
+
   // ================= Ansichten =================
-  const titles = { list: '📚 Meine Wörter', form: '✏️ Neues Wort', practice: '🎯 Üben' };
+  const titles = { list: '📚 Meine Wörter', form: '✏️ Neues Wort', practice: '🎯 Üben', settings: '⚙️ Einstellungen' };
   function show(view) {
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
     document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.view === view));
@@ -564,6 +778,7 @@
     if (view === 'list') renderList();
     if (view === 'practice') renderSetup();
     else session = null;
+    if (view === 'settings') renderSettings();
     window.scrollTo(0, 0);
   }
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
@@ -624,7 +839,7 @@
       card.appendChild(en);
 
       const actions = el('div', 'actions');
-      actions.appendChild(speakBtn(w.en));
+      actions.appendChild(speakBtn(w.en, false, true));
       const edit = el('button', 'act', '✏️');
       edit.setAttribute('aria-label', 'Ändern');
       edit.onclick = () => openForm(w.id);
@@ -682,8 +897,8 @@
     if (!w && window.matchMedia('(pointer: fine)').matches) f.en.focus();
   }
 
-  $('speakEn').onclick = () => speak(f.en.value.trim(), $('speakEn'));
-  $('speakSentence').onclick = () => speak(f.sentence.value.trim(), $('speakSentence'));
+  $('speakEn').onclick = () => sayWord(f.en.value, $('speakEn'));
+  $('speakSentence').onclick = () => saySentence(f.sentence.value, $('speakSentence'));
   $('btnCancel').onclick = () => { editId = null; show('list'); };
   Object.values(f).forEach(i => i.addEventListener('input', () => i.classList.remove('error')));
 
@@ -697,6 +912,7 @@
 
     if (editId) {
       const old = data.words.find(x => x.id === editId);
+      if (wordKey(old.en) !== wordKey(w.en)) delete old.audio; // neues Wort → Aufnahme neu suchen
       Object.assign(old, { en: w.en, de: w.de, sentence: w.sentence, unit: w.unit });
       save();
       editId = null;
@@ -822,7 +1038,7 @@
     const side = (face, lang, text, sentence) => {
       face.appendChild(el('div', 'flag', lang === 'en' ? '🇬🇧' : '🇩🇪'));
       face.appendChild(el('div', 'big-word', text));
-      if (lang === 'en') face.appendChild(speakBtn(text));
+      if (lang === 'en') face.appendChild(speakBtn(text, false, true));
       if (sentence && w.sentence) {
         const s = el('div', 'sentence');
         s.appendChild(el('span', '', w.sentence));
@@ -841,7 +1057,7 @@
     $('flip').classList.toggle('turned', session.turned);
     $('answer').classList.remove('off');
     // Bei Deutsch → Englisch das englische Wort gleich vorlesen
-    if (session.turned && data.settings.dir === 'de-en') speak(session.current.en);
+    if (session.turned && data.settings.dir === 'de-en') sayWord(session.current.en);
   }
   $('flip').onclick = turn;
 
@@ -924,8 +1140,7 @@
   }
 
   // ================= Sichern (Export / Import) =================
-  $('btnBackup').onclick = () => $('backup').classList.add('show');
-  $('btnBackupClose').onclick = () => $('backup').classList.remove('show');
+  $('btnSettings').onclick = () => show('settings');
 
   $('btnExport').onclick = async () => {
     const json = JSON.stringify({ app: 'vokabel-app', version: 1, exported: new Date().toISOString(), ...data }, null, 2);
@@ -956,7 +1171,6 @@
       if (!incoming.length) throw new Error('leer');
       var stats = !Array.isArray(d) && d.stats ? d.stats : null;
     } catch (err) {
-      $('backup').classList.remove('show');
       await ask('Diese Datei kann ich leider nicht lesen.', '😕');
       return;
     }
@@ -974,13 +1188,10 @@
     }
     save();
     updateStars(false);
-    $('backup').classList.remove('show');
     show('list');
     toast(`⬆️ ${added} neu, ${updated} aktualisiert`);
   };
 
-  // Overlay schließen beim Tippen daneben
-  ['backup'].forEach(id => $(id).addEventListener('click', (e) => { if (e.target.id === id) $(id).classList.remove('show'); }));
 
   // ================= Start =================
   renderList();
