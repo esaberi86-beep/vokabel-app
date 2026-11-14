@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#5b8def"/>
+  <rect x="96" y="140" width="300" height="220" rx="36" fill="#ffd36b" transform="rotate(-8 246 250)"/>
+  <rect x="116" y="150" width="300" height="220" rx="36" fill="#ffffff"/>
+  <text x="266" y="292" font-family="Arial Rounded MT Bold, Helvetica, Arial, sans-serif" font-weight="bold" font-size="104" fill="#2d2a40" text-anchor="middle">ABC</text>
+  <circle cx="390" cy="140" r="54" fill="#2fb36d"/>
+  <path d="M364 140 l18 18 l34 -36" stroke="#fff" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

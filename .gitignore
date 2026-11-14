@@ -1,0 +1,25 @@
+# macOS-Systemdateien
+.DS_Store
+._*
+
+# Einstellungen von Editoren / Claude Code
+.vscode/
+.idea/
+.claude/
+
+# Private Dateien: Schlüssel, Passwörter, Umgebungsvariablen
+.env
+.env.*
+*.key
+*.pem
+geheim*
+secret*
+
+# Texte und Dokumente, die du zum Testen benutzt (privat / Urheberrecht)
+*.pdf
+*.txt
+*.docx
+
+# Sonstiges
+*.log
+node_modules/
